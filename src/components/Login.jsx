@@ -7,10 +7,13 @@ export default function Login({ setToken }) {
   const [password, setPassword] = useState('password123')
   const navigate = useNavigate()
 
+  const API_URL = import.meta.env.VITE_API_URL  // ✅ Uses Render backend automatically
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     try {
-      const res = await axios.post('http://localhost:5000/api/login', { email, password })
+      const res = await axios.post(`${API_URL}/api/login`, { email, password })
+
       localStorage.setItem('token', res.data.token)
       localStorage.setItem('user', JSON.stringify(res.data.user))
       setToken(res.data.token)
@@ -24,7 +27,8 @@ export default function Login({ setToken }) {
     <div className="min-h-screen flex items-center justify-center bg-gray-900">
       <div className="bg-gray-800 p-10 rounded-xl shadow-2xl w-96">
         <h1 className="text-4xl font-bold text-white mb-8 text-center">MoneyFlow</h1>
-        
+
+        {/* Email/Password Login */}
         <form onSubmit={handleSubmit} className="space-y-6">
           <input
             type="email"
@@ -34,6 +38,7 @@ export default function Login({ setToken }) {
             className="w-full p-3 rounded bg-gray-700 text-white"
             required
           />
+
           <input
             type="password"
             value={password}
@@ -42,14 +47,19 @@ export default function Login({ setToken }) {
             className="w-full p-3 rounded bg-gray-700 text-white"
             required
           />
-          <button type="submit" className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded text-xl">
+
+          <button
+            type="submit"
+            className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded text-xl"
+          >
             Login
           </button>
         </form>
 
+        {/* Google Login */}
         <div className="mt-6">
           <a
-            href="http://localhost:5000/auth/google"
+            href={`${API_URL}/auth/google`}  // ✅ FIXED: No more localhost
             className="w-full bg-white text-gray-800 font-bold py-3 rounded flex items-center justify-center gap-3 hover:bg-gray-100 transition shadow-lg"
           >
             <img src="https://www.google.com/favicon.ico" alt="Google" className="w-6 h-6" />
