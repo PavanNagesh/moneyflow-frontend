@@ -1,43 +1,60 @@
 import { useEffect, useState, useMemo } from "react";
 import axios from "axios";
 import { format, startOfDay, subDays } from "date-fns";
+import { useOutletContext } from "react-router-dom";
 
-export default function History({ token }) {
+export default function History() {
+  const { token } = useOutletContext();
   const [expenses, setExpenses] = useState([]);
+  const API_URL = import.meta.env.VITE_API_URL;
 
   useEffect(() => {
     if (!token) return;
     let mounted = true;
     const load = async () => {
-      const res = await axios.get("http://localhost:5000/api/expenses", { headers: { Authorization: `Bearer ${token}` } });
-      if (mounted) setExpenses(res.data || []);
+      try {
+        const res = await axios.get(`${API_URL}/api/expenses`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (mounted) setExpenses(res.data || []);
+      } catch (err) {
+        console.error("History load error:", err);
+      }
     };
     load();
     return () => (mounted = false);
-  }, [token]);
+  }, [token, API_URL]);
 
-  // group by day for past 7 days
+  // helper: convert UTC date string to local Date object
+  const toLocal = (dateStr) => {
+    const d = new Date(dateStr);
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  };
+
+  // Last 7 days grouped
   const last7Group = useMemo(() => {
     const groups = [];
     for (let i = 0; i < 7; i++) {
       const day = subDays(new Date(), i);
-      const start = startOfDay(day);
-      const end = new Date(start.getTime() + 24*60*60*1000 - 1);
-      const items = expenses.filter(e => {
-        const d = new Date(e.date);
-        return d >= start && d <= end;
-      });
-      groups.push({ date: start, items });
+      const start = startOfDay(day).getTime();
+      const end = start + 24 * 60 * 60 * 1000 - 1;
+      const items = expenses
+        .filter((e) => {
+          const local = toLocal(e.date).getTime();
+          return local >= start && local <= end;
+        })
+        .sort((a, b) => new Date(b.date) - new Date(a.date));
+      groups.push({ date: new Date(start), items });
     }
     return groups;
   }, [expenses]);
 
-  // group by month
+  // Monthly grouping (local date)
   const monthly = useMemo(() => {
     const map = new Map();
-    expenses.forEach(e => {
-      const d = new Date(e.date);
-      const key = `${d.getFullYear()}-${d.getMonth()}`;
+    expenses.forEach((e) => {
+      const local = toLocal(e.date);
+      const key = `${local.getFullYear()}-${local.getMonth()}`;
       if (!map.has(key)) map.set(key, []);
       map.get(key).push(e);
     });
@@ -64,7 +81,7 @@ export default function History({ token }) {
                     <li key={it._id} className="flex justify-between">
                       <div>
                         <div className="font-semibold">{it.category}</div>
-                        <div className="text-sm text-gray-400">{it.note}</div>
+                        {it.note && <div className="text-sm text-gray-400">{it.note}</div>}
                       </div>
                       <div className="text-right">
                         <div className="font-medium">₹{it.amount}</div>

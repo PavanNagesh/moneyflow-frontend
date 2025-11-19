@@ -14,25 +14,29 @@ import {
   Line,
   Legend,
 } from "recharts";
-import { format, subDays, startOfDay } from "date-fns";
+import { format, subDays, startOfDay, endOfDay } from "date-fns";
+import { useOutletContext } from "react-router-dom";
 
 const COLORS = ["#8b5cf6", "#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#ec4899"];
 
-export default function Analytics({ token }) {
+export default function Analytics() {
+  const { token } = useOutletContext();
   const [expenses, setExpenses] = useState([]);
   const [rates, setRates] = useState({});
   const baseCurrency = "INR";
+  const API_URL = import.meta.env.VITE_API_URL;
 
   useEffect(() => {
     if (!token) return;
     let mounted = true;
+
     const load = async () => {
       try {
         const [expRes, rateRes] = await Promise.all([
-          axios.get("http://localhost:5000/api/expenses", {
+          axios.get(`${API_URL}/api/expenses`, {
             headers: { Authorization: `Bearer ${token}` },
           }),
-          axios.get("http://localhost:5000/api/currency"),
+          axios.get(`${API_URL}/api/currency`),
         ]);
         if (!mounted) return;
         setExpenses(expRes.data || []);
@@ -41,11 +45,12 @@ export default function Analytics({ token }) {
         console.error("Analytics load error:", err);
       }
     };
+
     load();
     return () => {
       mounted = false;
     };
-  }, [token]);
+  }, [token, API_URL]);
 
   const convert = useCallback(
     (amount, from) => {
@@ -54,18 +59,31 @@ export default function Analytics({ token }) {
       if (!rates[from] || !rates[baseCurrency]) return Number(amount);
       return (Number(amount) / rates[from]) * rates[baseCurrency];
     },
-    [rates, baseCurrency]
+    [rates]
   );
 
-  // Last 7 days line data
+  // helper: convert UTC date string to local Date object
+  const toLocal = (dateStr) => {
+    const d = new Date(dateStr);
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  };
+
+  // Last 7 days line data (oldest -> newest)
   const last7 = useMemo(() => {
+    const now = new Date();
     return Array.from({ length: 7 }, (_, i) => {
-      const d = subDays(new Date(), 6 - i); // oldest -> newest
-      const dayStart = startOfDay(d).getTime();
+      const day = subDays(now, 6 - i); // oldest -> newest
+      const dayStart = startOfDay(day).getTime();
+      const dayEnd = endOfDay(day).getTime();
+
       const total = expenses
-        .filter((e) => startOfDay(new Date(e.date)).getTime() === dayStart)
-        .reduce((s, e) => s + convert(e.amount, e.currency), 0);
-      return { day: format(d, "EEE"), total: Number(total.toFixed(2)) };
+        .filter((e) => {
+          const local = toLocal(e.date).getTime();
+          return local >= dayStart && local <= dayEnd;
+        })
+        .reduce((s, ev) => s + convert(ev.amount, ev.currency), 0);
+
+      return { day: format(day, "EEE"), total: Number(total.toFixed(2)) };
     });
   }, [expenses, convert]);
 
@@ -85,20 +103,23 @@ export default function Analytics({ token }) {
     return [...categoryData].sort((a, b) => b.value - a.value).slice(0, 5);
   }, [categoryData]);
 
-  // Monthly totals (6 months)
+  // Monthly totals (last 6 months)
   const months = useMemo(() => {
     const res = [];
     const now = new Date();
     for (let i = 5; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const monthLabel = format(d, "MMM");
+      const monthStart = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+      const monthEnd = new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime() - 1;
+
       const total = expenses
         .filter((e) => {
-          const dt = new Date(e.date);
-          return dt.getMonth() === d.getMonth() && dt.getFullYear() === d.getFullYear();
+          const local = toLocal(e.date).getTime();
+          return local >= monthStart && local <= monthEnd;
         })
-        .reduce((s, e) => s + convert(e.amount, e.currency), 0);
-      res.push({ month: monthLabel, total: Number(total.toFixed(2)) });
+        .reduce((s, ev) => s + convert(ev.amount, ev.currency), 0);
+
+      res.push({ month: format(d, "MMM"), total: Number(total.toFixed(2)) });
     }
     return res;
   }, [expenses, convert]);

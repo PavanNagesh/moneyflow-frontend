@@ -1,11 +1,18 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import { LayoutDashboard, PieChart, Clock, User, LogOut } from "lucide-react";
 
-export default function Sidebar({ token, setToken }) {
+export default function Sidebar({ setToken }) {
   const navigate = useNavigate();
 
   const logout = () => {
-    localStorage.clear();
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+
+    // notify App.jsx
+    window.dispatchEvent(
+      new CustomEvent("auth:token-changed", { detail: "" })
+    );
+
     setToken("");
     navigate("/login");
   };
@@ -39,13 +46,19 @@ export default function Sidebar({ token, setToken }) {
           >
             <div className="w-6 h-6 flex items-center justify-center">{l.icon}</div>
             <span className="font-medium">{l.name}</span>
-            <span className="absolute left-0 top-1/2 -translate-y-1/2 h-10 w-1 rounded-r" style={{ background: "linear-gradient(180deg,#8b5cf6,#ec4899)" }} />
+            <span
+              className="absolute left-0 top-1/2 -translate-y-1/2 h-10 w-1 rounded-r"
+              style={{ background: "linear-gradient(180deg,#8b5cf6,#ec4899)" }}
+            />
           </NavLink>
         ))}
       </nav>
 
       <div>
-        <button onClick={logout} className="mt-6 w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-red-600 hover:bg-red-700 text-white transition">
+        <button
+          onClick={logout}
+          className="mt-6 w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-red-600 hover:bg-red-700 text-white transition"
+        >
           <LogOut size={18} />
           Logout
         </button>
