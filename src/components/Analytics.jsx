@@ -14,7 +14,7 @@ import {
   Line,
   Legend,
 } from "recharts";
-import { format, subDays, startOfDay, endOfDay } from "date-fns";
+import { format } from "date-fns";
 import { useOutletContext } from "react-router-dom";
 
 const COLORS = ["#8b5cf6", "#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#ec4899"];
@@ -40,18 +40,23 @@ export default function Analytics() {
         ]);
         if (!mounted) return;
         setExpenses(expRes.data || []);
-        setRates((rateRes && rateRes.data && rateRes.data.rates) || {});
+        setRates(rateRes.data?.rates || {});
       } catch (err) {
         console.error("Analytics load error:", err);
       }
     };
 
     load();
-    return () => {
-      mounted = false;
-    };
+    return () => (mounted = false);
   }, [token, API_URL]);
 
+  // Convert backend timestamp → UTC date (no timezone shifts)
+  const toUTC = (dateStr) => {
+    const d = new Date(dateStr);
+    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  };
+
+  // Convert currency
   const convert = useCallback(
     (amount, from) => {
       if (!amount) return 0;
@@ -62,75 +67,73 @@ export default function Analytics() {
     [rates]
   );
 
-  // helper: convert UTC date string to local Date object
-  const toLocal = (dateStr) => {
-    const d = new Date(dateStr);
-    return new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-  };
-
-  // Last 7 days line data (oldest -> newest)
+  // ✔ FIXED — Last 7 days
   const last7 = useMemo(() => {
     const now = new Date();
-    return Array.from({ length: 7 }, (_, i) => {
-      const day = subDays(now, 6 - i); // oldest -> newest
-      const dayStart = startOfDay(day).getTime();
-      const dayEnd = endOfDay(day).getTime();
+    const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+
+    const result = [];
+
+    for (let i = 6; i >= 0; i--) {
+      const day = new Date(todayUTC);
+      day.setUTCDate(day.getUTCDate() - i);
 
       const total = expenses
         .filter((e) => {
-          const local = toLocal(e.date).getTime();
-          return local >= dayStart && local <= dayEnd;
+          const d = toUTC(e.date);
+          return d.toISOString().slice(0, 10) === day.toISOString().slice(0, 10);
         })
-        .reduce((s, ev) => s + convert(ev.amount, ev.currency), 0);
+        .reduce((sum, e) => sum + convert(e.amount, e.currency), 0);
 
-      return { day: format(day, "EEE"), total: Number(total.toFixed(2)) };
-    });
+      result.push({ day: format(day, "EEE"), total });
+    }
+
+    return result;
   }, [expenses, convert]);
 
-  // Category breakdown
+  // Category Breakdown
   const categoryData = useMemo(() => {
-    const m = new Map();
+    const map = new Map();
     expenses.forEach((e) => {
       const key = e.category || "Other";
-      const val = convert(e.amount, e.currency);
-      m.set(key, (m.get(key) || 0) + val);
+      const amount = convert(e.amount, e.currency);
+      map.set(key, (map.get(key) || 0) + amount);
     });
-    return Array.from(m, ([name, value]) => ({ name, value: Number(value.toFixed(2)) }));
+    return [...map].map(([name, value]) => ({ name, value }));
   }, [expenses, convert]);
 
-  // Top categories (for legend + small list)
   const topCategories = useMemo(() => {
     return [...categoryData].sort((a, b) => b.value - a.value).slice(0, 5);
   }, [categoryData]);
 
-  // Monthly totals (last 6 months)
+  // ✔ FIXED — Last 6 months
   const months = useMemo(() => {
-    const res = [];
     const now = new Date();
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const monthStart = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
-      const monthEnd = new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime() - 1;
+    const arr = [];
 
+    for (let i = 5; i >= 0; i--) {
+      const ref = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
       const total = expenses
         .filter((e) => {
-          const local = toLocal(e.date).getTime();
-          return local >= monthStart && local <= monthEnd;
+          const d = new Date(e.date);
+          return d.getUTCFullYear() === ref.getUTCFullYear() && d.getUTCMonth() === ref.getUTCMonth();
         })
-        .reduce((s, ev) => s + convert(ev.amount, ev.currency), 0);
+        .reduce((sum, e) => sum + convert(e.amount, e.currency), 0);
 
-      res.push({ month: format(d, "MMM"), total: Number(total.toFixed(2)) });
+      arr.push({ month: format(ref, "MMM"), total });
     }
-    return res;
+
+    return arr;
   }, [expenses, convert]);
 
   const grandTotal = useMemo(
-    () => expenses.reduce((s, e) => s + convert(e.amount, e.currency), 0),
+    () => expenses.reduce((sum, e) => sum + convert(e.amount, e.currency), 0),
     [expenses, convert]
   );
 
   return (
     <div className="space-y-8">
+      {/* LAST 7 DAYS */}
       <div className="flex flex-col lg:flex-row gap-6">
         <div className="flex-1 bg-[#0f1419] p-6 rounded-2xl border border-[#1a1b22]">
           <h3 className="text-lg font-semibold text-purple-300 mb-2">Last 7 Days</h3>
@@ -139,35 +142,45 @@ export default function Analytics() {
               <LineChart data={last7}>
                 <XAxis dataKey="day" stroke="#7b8088" />
                 <YAxis stroke="#7b8088" />
-                <Tooltip formatter={(v) => `₹${v}`} />
-                <Line type="monotone" dataKey="total" stroke="#8b5cf6" strokeWidth={3} dot={{ r: 3 }} />
+                <Tooltip formatter={(value) => `₹${value}`} />
+                <Line type="monotone" dataKey="total" stroke="#8b5cf6" strokeWidth={3} dot />
               </LineChart>
             </ResponsiveContainer>
           </div>
         </div>
 
+        {/* SUMMARY */}
         <div className="w-96 bg-[#0f1419] p-6 rounded-2xl border border-[#1a1b22]">
           <h3 className="text-lg font-semibold text-purple-300 mb-2">Summary</h3>
           <div className="space-y-3">
             <div className="flex justify-between">
               <span className="text-sm text-gray-300">Total (all time)</span>
-              <span className="font-semibold text-green-400">₹{Number(grandTotal.toFixed(2))}</span>
+              <span className="font-semibold text-green-400">₹{grandTotal.toFixed(2)}</span>
             </div>
+
             <div className="flex justify-between">
               <span className="text-sm text-gray-300">Tracked expenses</span>
               <span className="font-semibold text-gray-200">{expenses.length}</span>
             </div>
+
             <div>
               <p className="text-sm text-gray-300 mt-3">Top categories</p>
               <ul className="mt-2 space-y-2">
-                {topCategories.length === 0 && <li className="text-gray-500">No data yet</li>}
                 {topCategories.map((c, i) => (
-                  <li key={c.name} className="flex justify-between text-sm">
+                  <li key={i} className="flex justify-between text-sm">
                     <div className="flex items-center gap-2">
-                      <span style={{ width: 10, height: 10, background: COLORS[i % COLORS.length], display: "inline-block", borderRadius: 3 }} />
-                      <span className="text-gray-200">{c.name}</span>
+                      <span
+                        style={{
+                          width: 10,
+                          height: 10,
+                          background: COLORS[i % COLORS.length],
+                          borderRadius: 3,
+                          display: "inline-block",
+                        }}
+                      />
+                      {c.name}
                     </div>
-                    <span className="text-gray-300">₹{c.value}</span>
+                    <span>₹{c.value.toFixed(2)}</span>
                   </li>
                 ))}
               </ul>
@@ -176,30 +189,30 @@ export default function Analytics() {
         </div>
       </div>
 
-      {/* Middle section: Pie + Bars */}
+      {/* CATEGORY + MONTHS */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* PIE */}
         <div className="bg-[#0f1419] p-6 rounded-2xl border border-[#1a1b22]">
           <h3 className="text-lg font-semibold text-purple-300 mb-4">Category Breakdown</h3>
-          {categoryData.length === 0 ? (
-            <div className="text-gray-500">No data to show</div>
-          ) : (
-            <div style={{ width: "100%", height: 320 }}>
-              <ResponsiveContainer>
-                <PieChart>
-                  <Pie data={categoryData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} label>
-                    {categoryData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                  </Pie>
-                  <Tooltip formatter={(v) => `₹${v}`} />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-          )}
+          <div style={{ width: "100%", height: 300 }}>
+            <ResponsiveContainer>
+              <PieChart>
+                <Pie data={categoryData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} label>
+                  {categoryData.map((_, i) => (
+                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip formatter={(v) => `₹${v}`} />
+                <Legend />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
         </div>
 
+        {/* BAR */}
         <div className="bg-[#0f1419] p-6 rounded-2xl border border-[#1a1b22]">
           <h3 className="text-lg font-semibold text-purple-300 mb-4">Last 6 Months</h3>
-          <div style={{ width: "100%", height: 320 }}>
+          <div style={{ width: "100%", height: 300 }}>
             <ResponsiveContainer>
               <BarChart data={months}>
                 <XAxis dataKey="month" stroke="#7b8088" />
@@ -210,11 +223,6 @@ export default function Analytics() {
             </ResponsiveContainer>
           </div>
         </div>
-      </div>
-
-      {/* Footer small note */}
-      <div className="text-sm text-gray-500">
-        Currency conversions use external API rates. Values are shown in <strong>INR</strong> (base).
       </div>
     </div>
   );

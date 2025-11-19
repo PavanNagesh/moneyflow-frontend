@@ -24,9 +24,7 @@ export default function Dashboard() {
 
   const baseCurrency = user.base_currency || "INR";
 
-  // ------------------------------------
   // Load expenses & currency rates
-  // ------------------------------------
   useEffect(() => {
     if (!token) return;
     let mounted = true;
@@ -57,32 +55,28 @@ export default function Dashboard() {
     return () => (mounted = false);
   }, [token, API_URL]);
 
-  // ------------------------------------
-  // Fix timezone (UTC → Local)
-  // ------------------------------------
+  // Normalize UTC to Local
   const normalize = useCallback((date) => {
     const d = new Date(date);
     return new Date(d.getTime() - d.getTimezoneOffset() * 60000);
   }, []);
 
-  // ------------------------------------
   // Today’s expenses
-  // ------------------------------------
   const todayExpenses = useMemo(() => {
-    const todayStart = startOfDay(new Date());
-    const todayEnd = endOfDay(new Date());
+    const now = new Date();
+    const start = startOfDay(now);
+    const end = endOfDay(now);
 
     return expenses.filter((e) => {
-      const d = normalize(e.date);
-      return d >= todayStart && d <= todayEnd;
+      const local = normalize(e.date);
+      return local >= start && local <= end;
     });
   }, [expenses, normalize]);
 
-  // ------------------------------------
   // Search filter
-  // ------------------------------------
   const filteredToday = useMemo(() => {
     if (!term?.trim()) return todayExpenses;
+
     const t = term.toLowerCase();
 
     return todayExpenses.filter((e) => {
@@ -100,15 +94,16 @@ export default function Dashboard() {
     });
   }, [todayExpenses, term, normalize]);
 
-  // ------------------------------------
   // Convert currency
-  // ------------------------------------
   const convert = useCallback(
-    (amount, from) => {
-      if (from === baseCurrency) return Number(amount);
-      if (!rates[from] || !rates[baseCurrency]) return Number(amount);
+    (amt, from) => {
+      const amount = Number(amt);
+      if (!amount) return 0;
+      if (from === baseCurrency) return amount;
 
-      return (Number(amount) / rates[from]) * rates[baseCurrency];
+      if (!rates[from] || !rates[baseCurrency]) return amount;
+
+      return (amount / rates[from]) * rates[baseCurrency];
     },
     [rates, baseCurrency]
   );
@@ -118,9 +113,7 @@ export default function Dashboard() {
     0
   );
 
-  // ------------------------------------
   // Add expense
-  // ------------------------------------
   const addExpense = async (e) => {
     e.preventDefault();
     try {
@@ -146,9 +139,7 @@ export default function Dashboard() {
     }
   };
 
-  // ------------------------------------
   // Delete expense
-  // ------------------------------------
   const deleteExpense = async (id) => {
     if (!window.confirm("Delete this expense?")) return;
     try {
@@ -163,17 +154,10 @@ export default function Dashboard() {
     }
   };
 
-  // ------------------------------------
-  // Loading
-  // ------------------------------------
   if (loading) return <div className="text-xl">Loading...</div>;
 
-  // ------------------------------------
-  // UI
-  // ------------------------------------
   return (
     <div className="space-y-10">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-500">
@@ -189,9 +173,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
         {/* ADD EXPENSE */}
         <div className="lg:col-span-1">
           <div className="bg-gradient-to-b from-[#0f1419]/60 to-[#0b0f13]/40 border border-[#1a1b22] rounded-2xl p-6 shadow-xl">
@@ -200,7 +182,6 @@ export default function Dashboard() {
             </h3>
 
             <form onSubmit={addExpense} className="space-y-4">
-              
               <input
                 type="number"
                 placeholder="Amount"
@@ -246,15 +227,13 @@ export default function Dashboard() {
               <button className="w-full py-3 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 font-semibold">
                 Add Expense
               </button>
-
             </form>
           </div>
         </div>
 
-        {/* TODAY'S EXPENSE LIST */}
+        {/* TODAY LIST */}
         <div className="lg:col-span-2">
           <div className="space-y-4">
-
             {filteredToday.length === 0 ? (
               <div className="text-gray-400">No expenses today</div>
             ) : (
@@ -288,10 +267,8 @@ export default function Dashboard() {
                 </div>
               ))
             )}
-
           </div>
         </div>
-
       </div>
     </div>
   );
