@@ -24,26 +24,25 @@ export default function Dashboard() {
 
   const baseCurrency = user.base_currency || "INR";
 
-  // Load expenses & currency rates
+  // Load data
   useEffect(() => {
     if (!token) return;
+
     let mounted = true;
 
     const load = async () => {
       try {
-        setLoading(true);
-
         const [expRes, rateRes] = await Promise.all([
           axios.get(`${API_URL}/api/expenses`, {
             headers: { Authorization: `Bearer ${token}` },
           }),
-          axios.get(`${API_URL}/api/currency`),
+          axios.get(`${API_URL}/api/currency`)
         ]);
 
-        if (mounted) {
-          setExpenses(expRes.data || []);
-          setRates(rateRes.data?.rates || {});
-        }
+        if (!mounted) return;
+
+        setExpenses(expRes.data || []);
+        setRates(rateRes.data?.rates || {});
       } catch (err) {
         console.error("Dashboard load error:", err);
       } finally {
@@ -55,23 +54,19 @@ export default function Dashboard() {
     return () => (mounted = false);
   }, [token, API_URL]);
 
-  // Normalize UTC to Local
-  const normalize = useCallback((date) => {
-    const d = new Date(date);
-    return new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-  }, []);
+  // FIX: Correct timezone handling
+  const toLocal = useCallback((dateStr) => new Date(dateStr), []);
 
-  // Today’s expenses
+  // FIX: Correct today's filter
   const todayExpenses = useMemo(() => {
-    const now = new Date();
-    const start = startOfDay(now);
-    const end = endOfDay(now);
+    const todayStart = startOfDay(new Date());
+    const todayEnd = endOfDay(new Date());
 
     return expenses.filter((e) => {
-      const local = normalize(e.date);
-      return local >= start && local <= end;
+      const d = toLocal(e.date);
+      return d >= todayStart && d <= todayEnd;
     });
-  }, [expenses, normalize]);
+  }, [expenses, toLocal]);
 
   // Search filter
   const filteredToday = useMemo(() => {
@@ -80,10 +75,10 @@ export default function Dashboard() {
     const t = term.toLowerCase();
 
     return todayExpenses.filter((e) => {
-      const cat = (e.category || "").toLowerCase();
-      const note = (e.note || "").toLowerCase();
+      const cat = e.category?.toLowerCase() || "";
+      const note = e.note?.toLowerCase() || "";
       const amt = String(e.amount);
-      const dateText = format(normalize(e.date), "dd MMM yyyy hh:mm a").toLowerCase();
+      const dateText = format(toLocal(e.date), "dd MMM yyyy hh:mm a").toLowerCase();
 
       return (
         cat.includes(t) ||
@@ -92,18 +87,19 @@ export default function Dashboard() {
         dateText.includes(t)
       );
     });
-  }, [todayExpenses, term, normalize]);
+  }, [todayExpenses, term, toLocal]);
 
-  // Convert currency
+  // Currency conversion
   const convert = useCallback(
-    (amt, from) => {
-      const amount = Number(amt);
-      if (!amount) return 0;
-      if (from === baseCurrency) return amount;
+    (amount, from) => {
+      const amt = Number(amount);
+      if (!amt) return 0;
 
-      if (!rates[from] || !rates[baseCurrency]) return amount;
+      if (from === baseCurrency) return amt;
 
-      return (amount / rates[from]) * rates[baseCurrency];
+      if (!rates[from] || !rates[baseCurrency]) return amt;
+
+      return (amt / rates[from]) * rates[baseCurrency];
     },
     [rates, baseCurrency]
   );
@@ -116,10 +112,13 @@ export default function Dashboard() {
   // Add expense
   const addExpense = async (e) => {
     e.preventDefault();
+
     try {
-      await axios.post(`${API_URL}/api/expenses`, newExpense, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      await axios.post(
+        `${API_URL}/api/expenses`,
+        newExpense,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
 
       setNewExpense({
         amount: "",
@@ -129,7 +128,7 @@ export default function Dashboard() {
       });
 
       const updated = await axios.get(`${API_URL}/api/expenses`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}` }
       });
 
       setExpenses(updated.data || []);
@@ -139,15 +138,16 @@ export default function Dashboard() {
     }
   };
 
-  // Delete expense
+  // Delete
   const deleteExpense = async (id) => {
     if (!window.confirm("Delete this expense?")) return;
+
     try {
       await axios.delete(`${API_URL}/api/expenses/${id}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      setExpenses((prev) => prev.filter((x) => x._id !== id));
+      setExpenses((prev) => prev.filter((e) => e._id !== id));
     } catch (err) {
       console.error("Delete failed:", err);
       alert("Delete failed");
@@ -160,7 +160,7 @@ export default function Dashboard() {
     <div className="space-y-10">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-500">
+          <h1 className="text-4xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-pink-500">
             Hi, {user.username}! 👋
           </h1>
 
@@ -173,11 +173,12 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Add Expense + Today's list */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* ADD EXPENSE */}
-        <div className="lg:col-span-1">
-          <div className="bg-gradient-to-b from-[#0f1419]/60 to-[#0b0f13]/40 border border-[#1a1b22] rounded-2xl p-6 shadow-xl">
-            <h3 className="text-2xl font-semibold text-purple-300 mb-3">
+        {/* ADD */}
+        <div>
+          <div className="bg-[#0f1419] p-6 rounded-xl border border-[#1a1b22] shadow-xl">
+            <h3 className="text-xl font-semibold text-purple-300 mb-3">
               Add Expense
             </h3>
 
@@ -185,16 +186,16 @@ export default function Dashboard() {
               <input
                 type="number"
                 placeholder="Amount"
+                required
                 value={newExpense.amount}
                 onChange={(e) => setNewExpense({ ...newExpense, amount: e.target.value })}
-                className="w-full p-3 rounded-xl bg-[#1a2230] border border-[#232734] placeholder-gray-400"
-                required
+                className="w-full p-3 rounded-xl bg-[#1a2230] border border-[#232734]"
               />
 
               <select
                 value={newExpense.category}
                 onChange={(e) => setNewExpense({ ...newExpense, category: e.target.value })}
-                className="w-full p-3 rounded-xl bg-[#1a2230] border border-[#232734] text-gray-200"
+                className="w-full p-3 rounded-xl bg-[#1a2230] border border-[#232734]"
               >
                 <option>Food</option>
                 <option>Transport</option>
@@ -216,7 +217,7 @@ export default function Dashboard() {
               <select
                 value={newExpense.currency}
                 onChange={(e) => setNewExpense({ ...newExpense, currency: e.target.value })}
-                className="w-full p-3 rounded-xl bg-[#1a2230] border border-[#232734] text-gray-200"
+                className="w-full p-3 rounded-xl bg-[#1a2230] border border-[#232734]"
               >
                 <option>INR</option>
                 <option>USD</option>
@@ -238,28 +239,22 @@ export default function Dashboard() {
               <div className="text-gray-400">No expenses today</div>
             ) : (
               filteredToday.map((e) => (
-                <div
-                  key={e._id}
-                  className="bg-[#0f1419] border border-[#1a1b22] rounded-xl p-4 flex items-center justify-between shadow-md"
-                >
+                <div key={e._id} className="bg-[#0f1419] p-4 rounded-xl border border-[#1a1b22] flex justify-between">
                   <div>
-                    <p className="font-semibold text-lg">{e.category}</p>
-                    <p className="text-sm text-gray-400">
-                      {format(normalize(e.date), "dd MMM yyyy, hh:mm a")}
+                    <p className="text-lg font-semibold">{e.category}</p>
+                    <p className="text-gray-400 text-sm">
+                      {format(toLocal(e.date), "dd MMM yyyy, hh:mm a")}
                     </p>
-                    {e.note && (
-                      <p className="text-sm text-gray-300 mt-2">{e.note}</p>
-                    )}
+                    {e.note && <p className="text-sm mt-1 text-gray-300">{e.note}</p>}
                   </div>
 
                   <div className="text-right">
                     <p className="text-xl font-bold text-green-400">
                       ₹{convert(e.amount, e.currency).toFixed(2)}
                     </p>
-
                     <button
                       onClick={() => deleteExpense(e._id)}
-                      className="text-sm text-red-400 hover:text-red-300 mt-2"
+                      className="text-sm text-red-400 mt-2"
                     >
                       Delete
                     </button>
